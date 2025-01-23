@@ -3,16 +3,10 @@ import torch.nn as nn
 import numpy as np
 from typing import Literal
 from torch.utils.data import DataLoader, TensorDataset
+from tqdm import tqdm
 
 class LogisticRegression:
     def __init__(self, loss:Literal['log','square']='log',device:Literal['cpu','mps','cuda']|None = None) -> None:
-        match loss :
-            case 'log':
-                self.loss = nn.CrossEntropyLoss()
-            case 'square':
-                self.loss = nn.MSELoss()
-            case _:
-                raise ValueError('Unknown loss')
         self.model = None
         if torch.cuda.is_available():
             self.device = 'cuda'
@@ -22,8 +16,15 @@ class LogisticRegression:
             self.device = 'cpu'
         if device is not None:
             self.device = device
+        match loss :
+            case 'log':
+                self.loss = nn.CrossEntropyLoss().to(self.device)
+            case 'square':
+                self.loss = nn.MSELoss().to(self.device)
+            case _:
+                raise ValueError('Unknown loss')
 
-    def fit(self,X,y,opt:Literal['SGD','AdamW']|None = 'SGD', lr: float|None = 0.001, scheduler:Literal['cosine','linear']|None = None, batch_size: int = 64, epochs:int = 100) -> None:
+    def fit(self,X,y,opt:Literal['SGD','AdamW']|None = 'SGD', lr: float|None = 0.001, scheduler:Literal['cosine','linear']|None = None, batch_size: int = 64, epochs:int = 100,verbose=False) -> None:
         '''Run Gradient Descent'''
         if self.model is None:
             self.model = nn.Sequential(nn.Linear(X.shape[1],1),nn.Flatten(),nn.Sigmoid(),nn.Flatten(0)).to(self.device)
@@ -41,16 +42,19 @@ class LogisticRegression:
                 self.scheduler = torch.optim.lr_scheduler.LinearLR(self.optimizer)
             case _:
                 self.scheduler = None
-        dataset = TensorDataset(torch.tensor(X,device=self.device,dtype=torch.float32), torch.tensor(y,device=self.device,dtype=torch.float32))
-        trainloader = DataLoader(dataset,batch_size=batch_size)
-        for epoch in range(epochs):
-            for i, (x, y) in enumerate(trainloader):
-                x, y, = x.to(self.device), y.to(self.device)
-                self.optimizer.zero_grad()
-                output = self.model(x)
-                loss_output = self.loss(output, y)
-                loss_output.backward()
-                self.optimizer.step()
+        x_tensor = torch.tensor(X,device=self.device,dtype=torch.float32)
+        y_tensor = torch.tensor(y,device=self.device,dtype=torch.float32)
+        counter = (lambda x: x) if verbose == False else (lambda x: x)
+        for epoch in counter(range(epochs)):
+            #x, y = x.to(self.device), y.to(self.device)
+            self.optimizer.zero_grad()
+            output = self.model(x_tensor)
+            loss_output = self.loss(output, y_tensor)
+            loss_output.backward()
+            if verbose:
+                print(x_tensor,output,y_tensor)
+                print(loss_output.detach())
+            self.optimizer.step()
             
             if self.scheduler is not None:
                 self.scheduler.step()
