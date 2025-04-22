@@ -56,11 +56,12 @@ class CCGaussian:
         return np.power(X@w +b - self._prob(X),2).mean()
 
 class MixtureGaussian:
-    def __init__(self, delta_D: np.ndarray, delta_C: np.ndarray, sigma: np.ndarray, mu: np.ndarray | float =0, pi_0:float = 1/4, seed:int=42):
+    def __init__(self, delta_D: np.ndarray, delta_C: np.ndarray, sigma: np.ndarray, mu: np.ndarray | float =0, pi_0:float = 1/4, sigma_noise:float = 0, seed:int=42):
         # Given
         self.delta_D = np.array(delta_D)
         self.delta_C = np.array(delta_C)
         self.sigma = np.array(sigma)
+        self.sigma_noise = float(sigma_noise)
         self.mu = np.array(mu)
         self.pi_0 = float(pi_0)
         self.rng = np.random.default_rng(int(seed))
@@ -88,20 +89,33 @@ class MixtureGaussian:
         X_0R  = self.rng.multivariate_normal(self.mu_0R, self.sigma, size =n_min)
 
         X = np.concatenate((X_1R, X_1G, X_0R, X_0G))
+        tilde_X = X + self.sigma_noise * self.rng.multivariate_normal(np.zeros_like(self.delta_D), np.eye(len(self.delta_D)), size=len(X))
         y = np.concatenate((np.ones(n_maj), np.ones(n_min),np.zeros(n_min), np.zeros(n_maj)))
         group = np.concatenate((np.ones(n_maj), np.zeros(n_min),np.ones(n_min), np.zeros(n_maj)))
 
         if (as_df):
-            data = pd.DataFrame(X)
+            data = pd.DataFrame(tilde_X)
             data['target'] = y
             data['group'] = group
             return data
         else:
-            return X,y,group
+            return tilde_X,y,group
     
     def _prob(self,x):
-        pos_prob = 2 * ((1/2-self.pi_0) * st.multivariate_normal.pdf(x, self.mu_1R,self.sigma) + (self.pi_0) * st.multivariate_normal.pdf(x,self.mu_1G,self.sigma))
-        neg_prob = 2* ((self.pi_0) * st.multivariate_normal.pdf(x, self.mu_0R,self.sigma) + (1/2-self.pi_0) * st.multivariate_normal.pdf(x,self.mu_0G,self.sigma))
+        pos_prob = 2 * (
+            (1/2-self.pi_0) * st.multivariate_normal.pdf(
+                x, self.mu_1R,self.sigma + self.sigma_noise**2 * np.eye(self.sigma.shape[0])
+            ) + (self.pi_0) * st.multivariate_normal.pdf(
+                x,self.mu_1G,self.sigma + self.sigma_noise**2 * np.eye(self.sigma.shape[0])
+            )
+        )
+        neg_prob = 2* (
+            (self.pi_0) * st.multivariate_normal.pdf(
+                x, self.mu_0R,self.sigma + self.sigma_noise**2 * np.eye(self.sigma.shape[0])
+            ) + (1/2-self.pi_0) * st.multivariate_normal.pdf(
+                x,self.mu_0G,self.sigma + self.sigma_noise**2 * np.eye(self.sigma.shape[0])
+            )
+        )
         marginal = (pos_prob + neg_prob)/2
         return pos_prob * 0.5/marginal
 
@@ -113,6 +127,143 @@ class MixtureGaussian:
         X, y, group = self.generate(n,as_df=False)
         return np.power(X@w +b - self._prob(X),2).mean()
 
+class RandomMixtureGaussian:
+    def __init__(self, n_modes_per_class: int, class_sep: float = 2, mode_deviation:float = 2,d:int = None, sigma_noise:float = 0, seed:int=42):
+        # Given
+        self.d = int(d)
+        self.sigma_noise = float(sigma_noise)
+        self.n_modes_per_class = int(n_modes_per_class)
+        
+        self.rng = np.random.default_rng(int(seed))
+        self.mu_pos = np.array([class_sep/2/np.sqrt(self.d)]*self.d)
+        self.pos_means = self.rng.multivariate_normal(self.mu_pos, mode_deviation**2/self.d * np.eye(self.d), size=n_modes_per_class)
+        self.neg_means = self.rng.multivariate_normal(-self.mu_pos, mode_deviation**2/self.d * np.eye(self.d), size=n_modes_per_class)
+        self.means = np.stack((self.pos_means.T,self.neg_means.T),axis=2).T
+        self.sigma = np.eye(self.d)
+
+        self._X = None
+        self._y = None
+        self._domain = None
+    
+    def generate(self, n: int, as_df: bool = True) -> pd.DataFrame | tuple[np.ndarray, np.ndarray, np.ndarray]:
+        n = int(n)
+        self._y = self.rng.choice([0,1], replace=True, size = n).astype(int)
+        self._domain = self.rng.choice(len(self.pos_means), replace=True, size=n).astype(int)
+        self._X = self.rng.multivariate_normal(np.zeros(self.d), self.sigma, size=n) + self.means[self._y,self._domain]
+        X_sigma = self._X + self.sigma_noise * self.rng.multivariate_normal(np.zeros(self.d), np.eye(self.d), size=n)
+
+        if (as_df):
+            data = pd.DataFrame(X_sigma)
+            data['target'] = self._y
+            data['domain'] = self._domain
+            return data
+        else:
+            return X_sigma,self._y,self._domain
+    
+    def _prob(self,x):
+        """
+        Probability that x in is class 1
+        """
+        pos_prob = np.array([
+            st.multivariate_normal.pdf(
+                x, self.means[1,m],self.sigma+ self.sigma_noise**2 * np.eye(self.d)
+            )
+        for m in range(self.n_modes_per_class)]).mean(axis=0)
+        neg_prob = np.array([
+            st.multivariate_normal.pdf(
+                x, self.means[0,m],self.sigma+ self.sigma_noise**2 * np.eye(self.d)
+            )
+        for m in range(self.n_modes_per_class)]).mean(axis=0)
+        marginal = (pos_prob + neg_prob)/2
+        return pos_prob * 0.5/marginal
+
+    def _theta(self,x):
+        """
+        Optimal soft predictor
+        """
+        pos_prob = np.array([
+            st.multivariate_normal.pdf(
+                x, self.means[1,m],self.sigma+ self.sigma_noise**2 * np.eye(self.d)
+            )
+        for m in range(self.n_modes_per_class)]).mean(axis=0)
+        neg_prob = np.array([
+            st.multivariate_normal.pdf(
+                x, self.means[0,m],self.sigma+ self.sigma_noise**2 * np.eye(self.d)
+            )
+        for m in range(self.n_modes_per_class)]).mean(axis=0)
+        return np.log(pos_prob/neg_prob)
+
+    def mmse_estimate(self,n):
+        X, y, group = self.generate(n,as_df=False)
+        return np.power(y - self._prob(X),2).mean()
+
+    def model_mmse_estimate(self,w,b,n):
+        X, y, group = self.generate(n,as_df=False)
+        return np.power(X@w +b - self._prob(X),2).mean()
+
+class ScalingXORGaussian2D:
+    def __init__(self, n_modes_per_class: int, scale:float=1, sigma_noise:float = 0, seed:int=42):
+        # Given
+        self.sigma_noise = float(sigma_noise)
+        self.n_modes_per_class = int(n_modes_per_class)
+        self.d = 2
+        
+        self.rng = np.random.default_rng(int(seed))
+        self.means = [[],[]]
+
+        angles = np.linspace(0, 2 * np.pi, n_modes_per_class, endpoint=False)
+        delta = angles[1] - angles[0]
+        for angle in angles:
+            x,y = np.cos(angle),np.sin(angle)
+            self.means[0].append([x,y])
+            x_alt,y_alt = np.cos(angle+delta/2),np.sin(angle+delta/2)
+            self.means[1].append([x_alt,y_alt])
+        self.means = np.array(self.means)*scale
+        self.sigma = np.eye(self.d)/n_modes_per_class**2
+
+        self._X = None
+        self._y = None
+        self._domain = None
+    
+    def generate(self, n: int, as_df: bool = True) -> pd.DataFrame | tuple[np.ndarray, np.ndarray, np.ndarray]:
+        n = int(n)
+        self._y = self.rng.choice([0,1], replace=True, size = n).astype(int)
+        self._domain = self.rng.choice(self.n_modes_per_class, replace=True, size=n).astype(int)
+        self._X = self.rng.multivariate_normal(np.zeros(self.d), self.sigma, size=n) + self.means[self._y,self._domain]
+        X_sigma = self._X + self.sigma_noise /self.n_modes_per_class * self.rng.multivariate_normal(np.zeros(self.d), np.eye(self.d), size=n)
+
+        if (as_df):
+            data = pd.DataFrame(X_sigma)
+            data['target'] = self._y
+            data['domain'] = self._domain
+            return data
+        else:
+            return X_sigma,self._y,self._domain
+    
+    def _prob(self,x):
+        """
+        Probability that x in is class 1
+        """
+        pos_prob = np.array([
+            st.multivariate_normal.pdf(
+                x, self.means[1,m],self.sigma+ self.sigma_noise**2/self.n_modes_per_class**2 * np.eye(self.d)
+            )
+        for m in range(self.n_modes_per_class)]).mean(axis=0)
+        neg_prob = np.array([
+            st.multivariate_normal.pdf(
+                x, self.means[0,m],self.sigma+ self.sigma_noise**2/self.n_modes_per_class**2 * np.eye(self.d)
+            )
+        for m in range(self.n_modes_per_class)]).mean(axis=0)
+        marginal = (pos_prob + neg_prob)/2
+        return pos_prob * 0.5/marginal
+
+    def mmse_estimate(self,n):
+        X, y, group = self.generate(n,as_df=False)
+        return np.power(y - self._prob(X),2).mean()
+
+    def model_mmse_estimate(self,w,b,n):
+        X, y, group = self.generate(n,as_df=False)
+        return np.power(X@w +b - self._prob(X),2).mean()
 class BSCGaussian:
     def __init__(self, mu: np.ndarray, sigma: np.ndarray, p:float = 1/4,p_n:float=0.1, seed:int=42):
         # Given
