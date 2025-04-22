@@ -4,3 +4,4 @@ __pycache__/*
 *_results*/
 *_models*/
 logs/
+.ipynb*/

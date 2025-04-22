@@ -14,9 +14,10 @@ class OptLinear:
         a = np.cov(x,theta.reshape(-1,1),rowvar=False,ddof=1)[-1][:-1]
         self.a = a @ np.linalg.inv(np.cov(x,rowvar=False,ddof=1))
         self.b = theta.mean() - a.T@ x.mean(axis=0)
+        return self
 
     def predict_proba(self, x):
-        return 1/(1+np.exp(-z@a - b))
+        return 1/(1+np.exp(-x@self.a - self.b))
         
 class NeuralNetwork:
     def __init__(self, loss:Literal['log','square']='log',device:Literal['cpu','mps','cuda']|None = None) -> None:
