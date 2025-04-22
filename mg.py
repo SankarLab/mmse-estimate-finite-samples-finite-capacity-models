@@ -257,6 +257,19 @@ class ScalingXORGaussian2D:
         marginal = (pos_prob + neg_prob)/2
         return pos_prob * 0.5/marginal
 
+    def _theta(self,x):
+        pos_prob = np.array([
+            st.multivariate_normal.pdf(
+                x, self.means[1,m],self.sigma+ self.sigma_noise**2/self.n_modes_per_class**2 * np.eye(self.d)
+            )
+        for m in range(self.n_modes_per_class)]).mean(axis=0)
+        neg_prob = np.array([
+            st.multivariate_normal.pdf(
+                x, self.means[0,m],self.sigma+ self.sigma_noise**2/self.n_modes_per_class**2 * np.eye(self.d)
+            )
+        for m in range(self.n_modes_per_class)]).mean(axis=0)
+        return np.log(pos_prob/neg_prob)
+
     def mmse_estimate(self,n):
         X, y, group = self.generate(n,as_df=False)
         return np.power(y - self._prob(X),2).mean()
@@ -264,6 +277,7 @@ class ScalingXORGaussian2D:
     def model_mmse_estimate(self,w,b,n):
         X, y, group = self.generate(n,as_df=False)
         return np.power(X@w +b - self._prob(X),2).mean()
+
 class BSCGaussian:
     def __init__(self, mu: np.ndarray, sigma: np.ndarray, p:float = 1/4,p_n:float=0.1, seed:int=42):
         # Given

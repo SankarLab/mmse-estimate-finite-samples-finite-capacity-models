@@ -1,3 +1,6 @@
 __pycache__/*
 *.png
 *.csv
+*_results*/
+*_models*/
+logs/
