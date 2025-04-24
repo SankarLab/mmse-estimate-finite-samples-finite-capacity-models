@@ -44,15 +44,15 @@ first = True
 for sigma in sigma_range:
     mg = ScalingXORGaussian2D(n_modes_per_class = n_modes, scale=delta, sigma_noise=sigma,seed=args.seed)
     X_expected, y_expected, _ = mg.generate(1e6,as_df=False)
-    X_big, y_big, _ = mg.generate(1e6,as_df=False)
-    nn = gdNN(loss='square',device='cuda').fit(X_big, y_big,lr=1e-2, scheduler='cosine', epochs=5000, opt='AdamW', n_hidden = h)
+    X_big, y_big, _ = mg.generate(2e6,as_df=False)
+    nn = gdNN(loss='square',device='cuda').fit(X_big, y_big,lr=1e-2, scheduler='cosine', epochs=10000, opt='AdamW', n_hidden = h)
     delta_a = MSE(nn.predict_proba(X_expected), mg._prob(X_expected))
     for n in n_range:
         for seed in tqdm(range(30),leave=False):
             mg.rng = np.random.default_rng(args.seed+seed)
             X,y,_ = mg.generate(n,as_df=False)
             X_val, y_val, _ = mg.generate(val_n,as_df=False)
-            LR = gdNN(loss='square',device='cuda').fit(X, y,lr=1e-2, scheduler='cosine',epochs=5000,opt='AdamW',n_hidden = h)
+            LR = gdNN(loss='square',device='cuda').fit(X, y,lr=1e-2, scheduler='cosine',epochs=10000,opt='AdamW',n_hidden = h)
             if first:
                 file_path = os.path.join(args.model_path,f'gmm_xor_{args.n_modes}_{args.hidden}_{val_n}.pth.tar.gz')
                 torch.save(LR.model.state_dict(), file_path,_use_new_zipfile_serialization=True)
